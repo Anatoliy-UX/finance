@@ -789,20 +789,54 @@ document.getElementById('importFileInput').addEventListener('change', (e)=>{
 
 function processImportRows(rows){
   // Find header row: contains a cell matching "дата операц" and another matching "сумма"
+  const norm = s => String(s).replace(/[\r\n\u00A0]+/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
   let headerIdx = -1, dateCol=-1, amtCol=-1, descCol=-1;
-  for(let i=0;i<Math.min(rows.length,10);i++){
-    const row = rows[i].map(c=>String(c).toLowerCase());
-    const dCol = row.findIndex(c=>c.includes('дата опер'));
-    const aCol = row.findIndex(c=>c.includes('сумма'));
+  for(let i=0;i<Math.min(rows.length,20);i++){
+    const row = rows[i].map(norm);
+    const dCol = row.findIndex(c=>c.includes('дата') && c.includes('опер'));
+    let aCol = row.findIndex(c=>c.includes('сумма') && c.includes('валют'));
+    if(aCol===-1) aCol = row.findIndex(c=>c.includes('сумма'));
     if(dCol!==-1 && aCol!==-1){
       headerIdx=i; dateCol=dCol; amtCol=aCol;
-      descCol = row.findIndex(c=>c.includes('описание'));
+      descCol = row.findIndex(c=>c.includes('описан'));
       if(descCol===-1) descCol = row.findIndex(c=>c.includes('назначен'));
       break;
     }
   }
   if(headerIdx===-1){
-    document.getElementById('importBody').innerHTML = '<p class="import-summary">Не нашёл нужные колонки («Дата операции», «Сумма») в файле. Проверь, что это выписка по операциям, а не сводный отчёт.</p>';
+    // Fallback: guess columns by content pattern across sample rows
+    const dateRe = /^\d{1,2}\.\d{1,2}\.\d{4}/;
+    const votes = {};
+    for(let i=0;i<Math.min(rows.length,30);i++){
+      rows[i].forEach((cell, ci)=>{
+        const s = String(cell).trim();
+        const compact = s.replace(/[\s\u00A0]/g,'');
+        if(dateRe.test(s)) votes['d'+ci] = (votes['d'+ci]||0)+1;
+        if(/^-?\d[\d]*(?:[.,]\d+)?$/.test(compact) && compact.length>0) votes['a'+ci] = (votes['a'+ci]||0)+1;
+      });
+    }
+    let bestD=-1, bestDv=0, bestA=-1, bestAv=0;
+    Object.keys(votes).forEach(k=>{
+      const ci = Number(k.slice(1));
+      if(k[0]==='d' && votes[k]>bestDv){ bestDv=votes[k]; bestD=ci; }
+    });
+    Object.keys(votes).forEach(k=>{
+      const ci = Number(k.slice(1));
+      if(k[0]==='a' && votes[k]>bestAv && ci!==bestD){ bestAv=votes[k]; bestA=ci; }
+    });
+    if(bestD!==-1 && bestAv>=3){
+      dateCol=bestD; amtCol=bestA;
+      const lens = {};
+      for(let i=0;i<Math.min(rows.length,15);i++){
+        rows[i].forEach((cell,ci)=>{ lens[ci]=(lens[ci]||0)+String(cell).length; });
+      }
+      const candidates = Object.keys(lens).map(Number).filter(ci=>ci!==dateCol&&ci!==amtCol).sort((a,b)=>lens[b]-lens[a]);
+      descCol = candidates.length ? candidates[0] : -1;
+      headerIdx = 0; // start scanning from the very first row since there's no real header
+    }
+  }
+  if(dateCol===-1 || amtCol===-1){
+    document.getElementById('importBody').innerHTML = '<p class="import-summary">Не нашёл нужные колонки («Дата операции», «Сумма») в файле. Проверь, что это выписка по операциям, а не сводный отчёт. Если файл — CSV, попробуй экспортировать в формате Excel (.xlsx) из приложения банка.</p>';
     return;
   }
   const dataRows = rows.slice(headerIdx+1);
