@@ -8,6 +8,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#1C1E21">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#1C1E21;
@@ -59,8 +60,9 @@
   .stat.out .stat-value{color:var(--expense);}
   .stat.plan .stat-value{color:var(--planned);}
 
-  .tabs{ display:flex; gap:4px; margin:16px 18px 4px; background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:3px; }
-  .tab-btn{ flex:1; border:none; background:transparent; color:var(--ink-dim); padding:10px 0; border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .tabs{ display:flex; gap:4px; margin:16px 18px 4px; background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:3px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .tabs::-webkit-scrollbar{display:none;}
+  .tab-btn{ flex:0 0 auto; border:none; background:transparent; color:var(--ink-dim); padding:10px 16px; border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
   .tab-btn.active{background:var(--surface-2); color:var(--ink);}
 
   main{padding:10px 18px 100px;}
@@ -181,12 +183,31 @@
   .month-pick-row:last-child{border-bottom:none;}
   .month-pick-row.current{color:var(--ink); font-weight:700;}
   .month-pick-row:not(.current){color:var(--ink-dim);}
+  .card-card{ background:linear-gradient(155deg, var(--surface) 0%, #2A2225 100%); border:1px solid var(--line); border-radius:var(--radius); padding:19px; }
+  .card-debt{font-size:30px; font-weight:700; color:var(--expense);}
+  .card-actions{ margin-top:16px; }
+
+  .eyebrow-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+  .import-btn{ border:1px solid var(--line); background:var(--surface); color:var(--ink-dim); font-size:11px; font-weight:600; padding:6px 10px; border-radius:8px; }
+  .import-row{ display:flex; align-items:flex-start; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line); }
+  .import-row:last-child{border-bottom:none;}
+  .import-row input[type="checkbox"]{ width:20px; height:20px; margin-top:2px; flex-shrink:0; accent-color:var(--ink); }
+  .import-row-main{flex:1; min-width:0;}
+  .import-row-desc{font-size:12.5px; color:var(--ink-dim); line-height:1.4; margin-bottom:6px; }
+  .import-row-meta{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .import-row-date{font-size:11.5px; color:var(--ink-faint);}
+  .import-cat-select{ background:var(--surface-2); border:1px solid var(--line); color:var(--ink); font-size:12px; padding:5px 8px; border-radius:8px; }
+  .import-row-amt{font-size:14px; font-weight:600; flex-shrink:0; white-space:nowrap;}
+  .import-summary{ font-size:12.5px; color:var(--ink-faint); text-align:center; margin-bottom:14px; line-height:1.5; }
 </style>
 </head>
 <body>
 
 <header>
-  <p class="eyebrow">Бюджет · Санкт-Петербург</p>
+  <div class="eyebrow-row">
+    <p class="eyebrow">Бюджет · Санкт-Петербург</p>
+    <button class="import-btn" id="importBtn" title="Импорт выписки">⇪ Импорт</button>
+  </div>
   <div class="month-nav">
     <button class="month-btn" id="prevMonth">‹</button>
     <p class="month-title" id="monthTitle">—</p>
@@ -202,6 +223,18 @@
   </div>
 </header>
 
+<input type="file" id="importFileInput" accept=".csv,.xlsx,.xls" style="display:none;">
+
+<div class="sheet-backdrop" id="importBackdrop"></div>
+<div class="sheet" id="importSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header"><h3 id="importTitle">Импорт выписки</h3></div>
+  <div id="importBody">
+    <p class="import-summary">Поддерживаются выписки CSV/XLSX из Альфа-Банка, ВТБ, Озон и Яндекс Банка.</p>
+    <button class="save-btn" id="chooseFileBtn">Выбрать файл</button>
+  </div>
+</div>
+
 <div class="sheet-backdrop" id="monthBackdrop"></div>
 <div class="sheet" id="monthSheet">
   <div class="sheet-handle"></div>
@@ -215,6 +248,7 @@
   <button class="tab-btn" data-tab="plan">План</button>
   <button class="tab-btn" data-tab="cushion">Подушка</button>
   <button class="tab-btn" data-tab="overview">Обзор</button>
+  <button class="tab-btn" data-tab="card">Кредитка</button>
 </div>
 
 <main>
@@ -223,6 +257,7 @@
   <div id="planView" style="display:none;"></div>
   <div id="cushionView" style="display:none;"></div>
   <div id="overviewView" style="display:none;"></div>
+  <div id="cardView" style="display:none;"></div>
 </main>
 
 <button class="fab" id="fabBtn">+</button>
@@ -296,6 +331,7 @@ let transactions = [];
 let planned = [];
 let categories = [...DEFAULT_CATS];
 let cushion = { goal: 100000, saved: 0, log: [] };
+let creditCard = { debt: 0, log: [] };
 let currentType = 'expense';
 let selectedCat = categories[0];
 let viewingYm = currentYm();
@@ -320,6 +356,7 @@ async function loadData(){
   planned = lsGet('planned', []);
   categories = lsGet('categories', [...DEFAULT_CATS]);
   cushion = lsGet('cushion', cushion);
+  creditCard = lsGet('creditCard', creditCard);
   selectedCat = categories[0];
   buildCatGrid();
   render();
@@ -329,6 +366,7 @@ async function saveTransactions(){ lsSet('transactions', transactions); }
 async function savePlanned(){ lsSet('planned', planned); }
 async function saveCategories(){ lsSet('categories', categories); }
 async function saveCushion(){ lsSet('cushion', cushion); }
+async function saveCreditCard(){ lsSet('creditCard', creditCard); }
 
 let warningTimeout;
 function showSaveWarning(){
@@ -383,6 +421,7 @@ function render(){
   renderPlan();
   renderCushion();
   renderOverview();
+  renderCard();
 }
 
 function categoryBreakdown(list){
@@ -617,6 +656,231 @@ function renderOverview(){
   });
 }
 
+function renderCard(){
+  const el = document.getElementById('cardView');
+  let logHtml = '';
+  if(creditCard.log.length===0){
+    logHtml = '<div class="empty">Пока нет операций по кредитке.</div>';
+  } else {
+    const sorted = [...creditCard.log].sort((a,b)=> b.id-a.id);
+    logHtml = '<div class="day-group">';
+    sorted.forEach(l=>{
+      logHtml += `<div class="row">
+        <span class="dot ${l.type==='spend'?'expense':'income'}"></span>
+        <div class="row-main">
+          <div class="row-cat">${l.type==='spend' ? 'Потратил' : 'Оплатил'}</div>
+          <div class="row-note">${formatDate(l.date)}${l.note ? ' · '+escapeHtml(l.note) : ''}</div>
+        </div>
+        <div class="row-amt ${l.type==='spend'?'expense':'income'} num">${l.type==='spend'?'+':'−'}${fmt(l.amount)}</div>
+      </div>`;
+    });
+    logHtml += '</div>';
+  }
+
+  el.innerHTML = `
+    <div class="card-card">
+      <div class="stat-label">Текущий долг</div>
+      <div class="card-debt num">${fmt(creditCard.debt)}</div>
+      <div class="card-actions">
+        <input type="number" inputmode="decimal" class="cushion-amt-input num" id="cardAmtInput" placeholder="Сумма">
+        <div class="cushion-btn-row">
+          <button class="cushion-btn wd" id="cardSpendBtn" style="color:var(--expense);">+ Потратил</button>
+          <button class="cushion-btn dep" id="cardPayBtn">− Оплатил</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-card cushion-log"><p class="section-title"><span>История</span></p>${logHtml}</div>
+  `;
+
+  document.getElementById('cardSpendBtn').addEventListener('click', ()=> cardMove('spend'));
+  document.getElementById('cardPayBtn').addEventListener('click', ()=> cardMove('pay'));
+}
+
+async function cardMove(type){
+  const input = document.getElementById('cardAmtInput');
+  const amount = parseFloat(input.value);
+  if(!amount || amount<=0){ input.focus(); return; }
+  creditCard.debt += type==='spend' ? amount : -amount;
+  if(creditCard.debt < 0) creditCard.debt = 0;
+  creditCard.log.push({id:Date.now(), type, amount, date:todayStr()});
+  await saveCreditCard();
+  renderCard();
+}
+
+// ===== Bank statement import =====
+const EXCLUDE_PATTERNS = [
+  /внутрибанковский перевод между счетами/i,
+  /копилка для сдачи/i,
+  /cashin/i,
+  /внесение средств через устройство/i,
+];
+const CATEGORY_RULES = [
+  [/yandex.*(eda|food)|яндекс.*еда/i, 'Еда'],
+  [/yandex.*taxi|яндекс.*такси/i, 'Транспорт'],
+  [/scooters|самокат/i, 'Транспорт'],
+  [/аптека|pharm|здоровье/i, 'Здоровье'],
+  [/жкх|коммунал/i, 'Жильё'],
+  [/мобильная связь|интернет|связь/i, 'Другое'],
+  [/пятерочка|пятёрочка|магнит|перекресток|перекрёсток|ашан|лента|дикси|вкусвилл/i, 'Еда'],
+  [/зарплата|аванс/i, 'Зарплата'],
+];
+function guessCategory(desc){
+  for(const [re, cat] of CATEGORY_RULES){ if(re.test(desc)) return cat; }
+  return 'Другое';
+}
+function isExcludedByDefault(desc){
+  return EXCLUDE_PATTERNS.some(re => re.test(desc));
+}
+function parseAmountStr(str){
+  if(str===undefined || str===null) return NaN;
+  const cleaned = String(str).replace(/[\s\u00A0]/g,'').replace(',', '.');
+  return parseFloat(cleaned);
+}
+function parseDateDMY(str){
+  const m = String(str||'').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if(!m) return null;
+  return `${m[3]}-${pad2(Number(m[2]))}-${pad2(Number(m[1]))}`;
+}
+
+let importedKeys = [];
+let importRows = [];
+
+const importSheet = document.getElementById('importSheet');
+const importBackdrop = document.getElementById('importBackdrop');
+function openImportSheet(){
+  document.getElementById('importTitle').textContent = 'Импорт выписки';
+  document.getElementById('importBody').innerHTML = `
+    <p class="import-summary">Поддерживаются выписки CSV/XLSX из Альфа-Банка, ВТБ, Озон и Яндекс Банка.</p>
+    <button class="save-btn" id="chooseFileBtn">Выбрать файл</button>
+  `;
+  document.getElementById('chooseFileBtn').addEventListener('click', ()=> document.getElementById('importFileInput').click());
+  importSheet.classList.add('open');
+  importBackdrop.classList.add('open');
+}
+function closeImportSheet(){
+  importSheet.classList.remove('open');
+  importBackdrop.classList.remove('open');
+}
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  importedKeys = lsGet('importedKeys', []);
+  openImportSheet();
+});
+importBackdrop.addEventListener('click', closeImportSheet);
+
+document.getElementById('importFileInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = new Uint8Array(ev.target.result);
+      const wb = XLSX.read(data, {type:'array', codepage:65001});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''});
+      processImportRows(rows);
+    }catch(err){
+      console.error(err);
+      document.getElementById('importBody').innerHTML = '<p class="import-summary">Не удалось прочитать файл. Попробуй экспортировать выписку в формате Excel (.xlsx) из приложения банка.</p>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+});
+
+function processImportRows(rows){
+  // Find header row: contains a cell matching "дата операц" and another matching "сумма"
+  let headerIdx = -1, dateCol=-1, amtCol=-1, descCol=-1;
+  for(let i=0;i<Math.min(rows.length,10);i++){
+    const row = rows[i].map(c=>String(c).toLowerCase());
+    const dCol = row.findIndex(c=>c.includes('дата опер'));
+    const aCol = row.findIndex(c=>c.includes('сумма'));
+    if(dCol!==-1 && aCol!==-1){
+      headerIdx=i; dateCol=dCol; amtCol=aCol;
+      descCol = row.findIndex(c=>c.includes('описание'));
+      if(descCol===-1) descCol = row.findIndex(c=>c.includes('назначен'));
+      break;
+    }
+  }
+  if(headerIdx===-1){
+    document.getElementById('importBody').innerHTML = '<p class="import-summary">Не нашёл нужные колонки («Дата операции», «Сумма») в файле. Проверь, что это выписка по операциям, а не сводный отчёт.</p>';
+    return;
+  }
+  const dataRows = rows.slice(headerIdx+1);
+  let skippedDup = 0;
+  importRows = [];
+  dataRows.forEach((r, idx)=>{
+    const dateStr = r[dateCol];
+    const amtStr = r[amtCol];
+    const desc = descCol!==-1 ? String(r[descCol]||'').replace(/\s+/g,' ').trim() : '';
+    const date = parseDateDMY(dateStr);
+    const amount = parseAmountStr(amtStr);
+    if(!date || isNaN(amount) || amount===0) return;
+    const key = `${date}|${amount}|${desc.slice(0,40)}`;
+    if(importedKeys.includes(key)){ skippedDup++; return; }
+    const type = amount < 0 ? 'expense' : 'income';
+    importRows.push({
+      id: 'imp'+idx,
+      key, date, amount: Math.abs(amount), type, desc,
+      category: type==='income' ? 'Другое' : guessCategory(desc),
+      include: !isExcludedByDefault(desc)
+    });
+  });
+  renderImportPreview(skippedDup);
+}
+
+function renderImportPreview(skippedDup){
+  const body = document.getElementById('importBody');
+  if(importRows.length===0){
+    body.innerHTML = `<p class="import-summary">Новых операций не найдено${skippedDup?` (пропущено ${skippedDup} уже импортированных ранее)`:''}.</p>`;
+    return;
+  }
+  const rowsHtml = importRows.map(r => `
+    <div class="import-row" data-id="${r.id}">
+      <input type="checkbox" class="import-check" data-id="${r.id}" ${r.include?'checked':''}>
+      <div class="import-row-main">
+        <div class="import-row-desc">${escapeHtml(r.desc || (r.type==='income'?'Поступление':'Списание'))}</div>
+        <div class="import-row-meta">
+          <span class="import-row-date">${formatDate(r.date)}</span>
+          <select class="import-cat-select" data-id="${r.id}">
+            ${categories.map(c=>`<option value="${c}" ${c===r.category?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="import-row-amt ${r.type}">${r.type==='income'?'+':'−'}${fmt(r.amount)}</div>
+    </div>
+  `).join('');
+  body.innerHTML = `
+    <p class="import-summary">Найдено ${importRows.length} операций${skippedDup?`, пропущено ${skippedDup} дублей`:''}. Сними галочки с переводов между своими счетами — они уже отмечены автоматически.</p>
+    <div style="max-height:50vh; overflow-y:auto; border:1px solid var(--line); border-radius:12px; margin-bottom:14px;">${rowsHtml}</div>
+    <button class="save-btn" id="confirmImportBtn">Импортировать отмеченные</button>
+  `;
+  body.querySelectorAll('.import-check').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const r = importRows.find(x=>x.id===chk.dataset.id);
+      if(r) r.include = chk.checked;
+    });
+  });
+  body.querySelectorAll('.import-cat-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const r = importRows.find(x=>x.id===sel.dataset.id);
+      if(r) r.category = sel.value;
+    });
+  });
+  document.getElementById('confirmImportBtn').addEventListener('click', confirmImport);
+}
+
+async function confirmImport(){
+  const toImport = importRows.filter(r=>r.include);
+  toImport.forEach(r=>{
+    transactions.push({id:Date.now()+Math.random(), type:r.type, category:r.category, amount:r.amount, date:r.date, note:''});
+    importedKeys.push(r.key);
+  });
+  await saveTransactions();
+  lsSet('importedKeys', importedKeys);
+  closeImportSheet();
+  render();
+}
+
 async function markPaid(id){
   const idx = planned.findIndex(p=>p.id===id);
   if(idx===-1) return;
@@ -722,6 +986,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.getElementById('planView').style.display = tab==='plan' ? '' : 'none';
     document.getElementById('cushionView').style.display = tab==='cushion' ? '' : 'none';
     document.getElementById('overviewView').style.display = tab==='overview' ? '' : 'none';
+    document.getElementById('cardView').style.display = tab==='card' ? '' : 'none';
   });
 });
 
