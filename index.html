@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Бюджет</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#1C1E21">
 <style>
   :root{
     --bg:#1C1E21;
@@ -801,6 +805,12 @@ document.getElementById('deleteBtn').addEventListener('click', async ()=>{
 });
 
 loadData();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(e=>console.error('SW register failed', e));
+  });
+}
 </script>
 </body>
 </html>
